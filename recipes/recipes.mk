@@ -133,6 +133,11 @@ _output/literate_lean4.lean.rst: literate_lean4.lean
 	$(alectryon) $< --backend rst
 recipes_targets += _output/literate_lean4.lean.rst
 
+# MyST → HTML
+_output/literate_lean4_MyST.html: literate_lean4_MyST.md
+	$(alectryon) $<
+recipes_targets += _output/literate_lean4_MyST.html
+
 # reST+Coq → HTML
 _output/literate_reST.html: literate_reST.rst
 	$(alectryon) $<
