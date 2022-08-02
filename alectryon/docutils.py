@@ -1236,6 +1236,133 @@ def make_RSTLiterateParser(lang: str) -> Type[RSTLiterateParser]:
                 {"LANG": lang, "supported": (lang,),
                  "SOURCE_SUFFIXES": core.EXTENSIONS_BY_LANGUAGE[lang]})
 
+def code2md_lines(lang, code):
+    from .literate import partition_literate
+    return gen_md(lang, partition_literate(lang, code))
+
+def gen_md(lang, spans):
+    from .literate import Comment, number_lines, lit, split_lines_numbered, strip_deque
+    linum, indent, prefix = 0, "", [lang.header]
+    for span in spans:
+        if isinstance(span, Comment):
+            linestrs = lang.unwrap_literate(span.v)
+            linum, lines = number_lines(linestrs, linum)
+            litspan = lit(lang, lines, indent)
+            indent, prefix = litspan.indent, litspan.directive_lines
+            if litspan.lines:
+                yield from (lang.unquote(l) for l in litspan.lines)
+                yield ""
+        else:
+            linum, lines = split_lines_numbered(span.v, linum)
+            strip_deque(lines)
+            if lines:
+                # FIXME: annotations are not working
+                yield "```{}".format(lang.name)
+                # FIXME: using the next line instead should make annotations work, but causes
+                # NotImplementedError: <class 'alectryon.docutils.make_HtmlTranslator.<locals>.Translator'> visiting unknown node type: alectryon_pending
+                # yield "```{eval-rst}"
+                # yield from prefix
+                yield ""
+                for line in lines:
+                    yield indent + "   " + line
+                yield ""
+                yield "```"
+
+from alectryon.myst import Parser as MystParser
+class MDLiterateParser(docutils.parsers.rst.Parser): # type: ignore
+    """A wrapper around the Markedly Structured Text (MyST) parser for literate files."""
+
+    LANG = "" # Needed by Sphinx
+    SOURCE_SUFFIXES: Tuple[str, ...] = ()
+
+    supported: ClassVar[Tuple[str, ...]] = ()
+    config_section = 'Literate parser'
+    config_section_dependencies: ClassVar[Tuple[str, ...]] = ('parsers',)
+
+    @staticmethod
+    def md_lines(lang, code):
+        from .literate import Line
+        last_line = 0
+        for line in code2md_lines(lang, code):
+            if isinstance(line, Line):
+                yield (str(line), line.num)
+                last_line = line.num
+            else:
+                assert isinstance(line, str)
+                yield (line, last_line)
+
+    @classmethod
+    def input_lines(cls, lang, code, source):
+        from docutils.statemachine import StringList
+        lines = cls.md_lines(lang, code)
+        initlist, items = [], []
+        # initlist = []
+        # Don't use zip(): we need lists, not tuples, and the input can be empty
+        for (line, i) in lines:
+            initlist.append(line)
+        # return initlist
+        #     items.append((source, i))
+        return StringList(initlist, source, items)
+
+    def report_parsing_error(self, e):
+        self.document.append(self.document.reporter.severe(
+            e.message, line=e.line, column=e.column,
+            end_line=e.end_line, end_column=e.end_column))
+
+    @property
+    def lang(self):
+        from . import literate
+        assert set(literate.LANGUAGES) == set(core.ALL_LANGUAGES)
+        return literate.LANGUAGES[self.LANG]
+
+    def parse(self, inputstring, document):
+        """Parse `inputstring` and populate `document`, a document tree."""
+        from .literate import ParsingError
+
+        self.setup_parse(inputstring, document)
+        # pylint: disable=attribute-defined-outside-init
+        alectryon_state(document).root_is_code = True
+        # self.statemachine = docutils.parsers.rst.states.RSTStateMachine( # type: ignore
+        #     state_classes=self.state_classes,
+        #     initial_state=self.initial_state,
+        #     debug=document.reporter.debug_flag)
+        try:
+            lines = self.input_lines(self.lang, inputstring, document['source'])
+            # self.statemachine.run(lines, document, inliner=self.inliner)
+
+            # for line in lines:
+            #     document.reporter.warning(str(line))
+
+            parser = MystParser()
+            parser.parse("\n".join([str(line) for line in lines]), document)
+        except ParsingError as e:
+            self.report_parsing_error(e)
+        finally:
+            roles._roles.pop('', None) # Reset the default role
+        self.finish_parse()
+
+        # self.setup_parse(inputstring, document)
+        # # pylint: disable=attribute-defined-outside-init
+        # alectryon_state(document).root_is_code = True
+        # self.statemachine = docutils.parsers.rst.states.RSTStateMachine( # type: ignore
+        #     state_classes=self.state_classes,
+        #     initial_state=self.initial_state,
+        #     debug=document.reporter.debug_flag)
+        # try:
+        #     lines = self.input_lines(self.lang, inputstring, document['source'])
+        #     self.statemachine.run(lines, document, inliner=self.inliner)
+        # except ParsingError as e:
+        #     self.report_parsing_error(e)
+        # finally:
+        #     roles._roles.pop('', None) # Reset the default role
+        # self.finish_parse()
+
+def make_MDLiterateParser(lang: str) -> Type[MDLiterateParser]:
+    return type("{}MdLiterateParser".format(lang.capitalize()),
+                (MDLiterateParser,),
+                {"LANG": lang, "supported": (lang,),
+                 "SOURCE_SUFFIXES": core.EXTENSIONS_BY_LANGUAGE[lang]})
+
 # Writer
 # ------
 
@@ -1436,11 +1563,18 @@ CODE_PARSERS_BY_LANGUAGE = {
     for lang in core.ALL_LANGUAGES
 }
 
+CODE_MD_PARSERS_BY_LANGUAGE = {
+    lang: make_MDLiterateParser(lang)
+    for lang in core.ALL_LANGUAGES
+}
+
 PARSERS: Dict[str, Union[Tuple[str, str], Type[RSTLiterateParser]]] = {
     "rst": ("docutils.parsers.rst", "Parser"),
     "md": ("alectryon.myst", "Parser"),
     **{"{}+rst".format(lang): parser
-       for lang, parser in CODE_PARSERS_BY_LANGUAGE.items()}
+       for lang, parser in CODE_PARSERS_BY_LANGUAGE.items()},
+    **{"{}+md".format(lang): parser
+       for lang, parser in CODE_MD_PARSERS_BY_LANGUAGE.items()}
 }
 
 BACKENDS = {

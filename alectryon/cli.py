@@ -449,6 +449,17 @@ def _add_code_pipelines(pipelines, lang, *exts):
         (read_plain, register_docutils, gen_docutils,
          write_file(".lint.json", strip=(*exts, ".rst"))),
     }
+    pipelines[lang + '+md'] = {
+        'webpage':
+        (read_plain, register_docutils, gen_docutils, copy_assets,
+         write_file(".html", strip=(*exts, ".md"))),
+        'latex':
+        (read_plain, register_docutils, gen_docutils, copy_assets,
+         write_file(".tex", strip=(*exts, "md"))),
+        'lint':
+        (read_plain, register_docutils, gen_docutils,
+         write_file(".lint.json", strip=(*exts, ".md"))),
+    }
 
 def _add_coqdoc_pipeline(pipelines):
     pipelines['coqdoc'] = {
@@ -544,6 +555,7 @@ def _default_language_backends(lang):
         lang + '.json': 'json',
         lang + '.io.json': 'webpage',
         lang + '+rst': 'webpage',
+        lang + '+md': 'webpage',
     }
 
 DEFAULT_BACKENDS = {
